@@ -1,11 +1,4 @@
-[(Français)](#le-nom-du-projet)
-
-## Name of the project
-
-- What is this project?
-- How does it work?
-- Who will use this project?
-- What is the goal of this project?
+[(Français)](#comment-contribuer)
 
 ### How to Contribute
 
@@ -18,13 +11,6 @@ Unless otherwise noted, the source code of this project is covered under Crown C
 The Canada wordmark and related graphics associated with this distribution are protected under trademark law and copyright law. No permission is granted to use them outside the parameters of the Government of Canada's corporate identity program. For more information, see [Federal identity requirements](https://www.canada.ca/en/treasury-board-secretariat/topics/government-communications/federal-identity-requirements.html).
 
 ______________________
-
-## Le nom du projet
-
-- Quel est ce projet?
-- Comment ça marche?
-- Qui utilisera ce projet?
-- Quel est le but de ce projet?
 
 ### Comment contribuer
 

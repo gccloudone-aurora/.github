@@ -1,0 +1,16 @@
+name: Build Push Containers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - $default-branch
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - $default-branch
+
+jobs:
+  build-push-container:
+    uses: gccloudone-aurora/.github/workflows/build-push-container.yaml@v1
