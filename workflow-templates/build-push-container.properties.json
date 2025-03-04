@@ -1,0 +1,4 @@
+{
+    "name": "Build Push Containers",
+    "description": "Build and/or push open-source containers to GHCR"
+}
