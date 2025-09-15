@@ -28,7 +28,7 @@ body:
     attributes:
       label: Client / Partner
       description: Department, SSC field, or team this Task benefits.
-      placeholder: PHAC
+      placeholder: STC
 
   - type: textarea
     id: details
