@@ -1,0 +1,23 @@
+name: Improvement / Feature Request
+description: Suggest an improvement or request a new feature.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Describe the change, alternatives, 
+
+  - type: input
+    id: who
+    attributes:
+      label: Who benefits?
+      placeholder: team, dept, end-users, etc.
