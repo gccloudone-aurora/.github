@@ -1,0 +1,41 @@
+name: Task
+description: Track an individual piece of work that rolls up into an Epic.
+title: "[Task]: "
+labels: [task]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Task Summary
+        Describe what needs to be done and how it supports the Epic.
+
+  - type: input
+    id: epic
+    attributes:
+      label: Linked Epic
+      description: Reference the parent Epic issue number.
+      placeholder: "#123"
+
+  - type: input
+    id: quarter
+    attributes:
+      label: Target Quarter
+      description: Planned quarter (e.g., Q4 2025, Q1 2026).
+      placeholder: Q4 2025
+
+  - type: input
+    id: client
+    attributes:
+      label: Client / Partner
+      description: Department, SSC field, or team this Task benefits.
+      placeholder: PHAC
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / Acceptance Criteria
+      description: Steps, acceptance criteria, or notes.
+      placeholder: |
+        - Step 1
+        - Step 2
+        - Done when...
