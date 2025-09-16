@@ -31,6 +31,7 @@ jobs:
         with:
           app_id: ${{ secrets.AURORA_APP_ID }}
           private_key: ${{ secrets.AURORA_APP_PRIVATE_KEY }}
+          owner: gccloudone-aurora
 
       - name: Install GitHub Projects v2 extension
         env:
