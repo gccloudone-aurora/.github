@@ -25,13 +25,13 @@ jobs:
       PROJECT_NUMBER: ${{ vars.AURORA_PROJECT_NUMBER }}
 
     steps:
-      - name: Generate GitHub App installation token
+      - name: Create app token for target org (gccloudone-aurora)
         id: app-token
-        uses: tibdex/github-app-token@v2
+        uses: actions/create-github-app-token@v1
         with:
-          app_id: ${{ secrets.AURORA_APP_ID }}
-          private_key: ${{ secrets.AURORA_APP_PRIVATE_KEY }}
-          owner: gccloudone-aurora
+          app-id: ${{ secrets.AURORA_APP_ID }}
+          private-key: ${{ secrets.AURORA_APP_PRIVATE_KEY }}
+          owner: ${{ env.ORG }}
 
       - name: Install GitHub Projects v2 extension
         env:
@@ -72,12 +72,7 @@ jobs:
         run: |
           echo "Setting Status=Todo for item $ITEM_ID on project $PROJECT_ID"
           gh api graphql -f query='
-            mutation(
-              $projectId: ID!,
-              $itemId: ID!,
-              $fieldId: ID!,
-              $optionId: String!
-            ) {
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
               updateProjectV2ItemFieldValue(
                 input: {
                   projectId: $projectId
