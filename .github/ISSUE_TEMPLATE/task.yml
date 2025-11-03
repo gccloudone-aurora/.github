@@ -15,7 +15,7 @@ body:
       description: Parent epic issue number (e.g., `#122`). Required so we can track roll-up progress.
       placeholder: "#<epic-number>"
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: description
