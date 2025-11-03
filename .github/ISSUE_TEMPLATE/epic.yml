@@ -17,6 +17,16 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Define measurable conditions for completion of this epic.
+      placeholder: |
+        - [ ] All workloads migrated to Workload Identity
+        - [ ] Documentation updated in TechDocs
+        - [ ] Cluster add-ons redeployed without downtime
+
   - type: input
     id: quarter
     attributes:
@@ -30,20 +40,3 @@ body:
       label: Client / Partner
       description: Department, SSC Field, or Project Team this epic benefits (e.g., STC, SSC-Aurora).
       placeholder: STC
-
-  - type: textarea
-    id: outcome
-    attributes:
-      label: Outcome
-      description: Business or technical value delivered when this epic is complete.
-      placeholder: Shared trusted images reduce duplication and cost.
-
-  - type: textarea
-    id: tasks
-    attributes:
-      label: Tasks (sub-issues)
-      description: Use issue convention to link tasks; progress auto-rolls up here.
-      placeholder: |
-        - [ ] #123 Define repo structure in JFrog
-        - [ ] #124 Nightly sync from Chainguard → JFrog
-        - [ ] #125 Consumer docs for departments
