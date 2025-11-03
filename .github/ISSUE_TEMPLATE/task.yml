@@ -26,6 +26,17 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Checklist of verifiable outcomes for this task.
+      placeholder: |
+        - [ ] Chart passes `helm lint`
+        - [ ] Installs in k3s (CI)
+        - [ ] Docs added in /docs
+        - [ ] CI runs lint + install checks
+
   - type: input
     id: quarter
     attributes:
@@ -39,14 +50,3 @@ body:
       label: Client / Partner
       description: Department, SSC Field, or Project Team this epic benefits (e.g., STC, SSC-Aurora).
       placeholder: STC
-
-  - type: textarea
-    id: acceptance
-    attributes:
-      label: Acceptance Criteria
-      description: Checklist of verifiable outcomes for this task.
-      placeholder: |
-        - [ ] Chart passes `helm lint`
-        - [ ] Installs in k3s (CI)
-        - [ ] Docs added in /docs
-        - [ ] CI runs lint + install checks
