@@ -6,7 +6,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        🔖 Please follow our [Issue & PR Naming Conventions](https://aurora.gccloudone.alpha.canada.ca/team/standard-operating-procedures/issue-naming/).
+        🔖 Please follow our standards before creating or assigning this issue:
+
+        - [Issue & PR Naming Conventions](https://aurora.gccloudone.alpha.canada.ca/team/standard-operating-procedures/issue-naming/)
+        - [Issue Tracking](https://aurora.gccloudone.alpha.canada.ca/team/standard-operating-procedures/issue-tracking/)
 
   - type: input
     id: epic
