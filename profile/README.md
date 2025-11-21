@@ -10,3 +10,4 @@ Welcome to the **GC Cloud One: Aurora** GitHub organization.
 
 - **[gccloudone-aurora](https://github.com/gccloudone-aurora)**: The primary Aurora organization, managing Kubernetes manifests, controllers, and operators for platform automation, governance, and workload orchestration
 - **[gccloudone-aurora-iac](https://github.com/gccloudone-aurora-iac)**: Dedicated to Infrastructure as Code (IaC) for Aurora, enabling automated provisioning and management of cloud infrastructure across multiple environments
+- **[gccloudone-aurora-collab](https://github.com/gccloudone-aurora-collab)**: A collaboration-focused organization for shared Aurora projects, enabling cross-department contributions, reusable tooling, and community-driven development.
