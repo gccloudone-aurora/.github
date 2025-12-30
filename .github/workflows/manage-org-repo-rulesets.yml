@@ -1,0 +1,68 @@
+name: Organization Ruleset
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "org-rulesets/default.json" ]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  sync_org_ruleset:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create app token for target org (gccloudone-aurora)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.GCCO_ADMIN_APP_ID }}
+          private-key: ${{ secrets.GCCO_ADMIN_APP_KEY }}
+          owner: ${{ env.ORG }}
+
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Authenticate GitHub CLI
+        run: |
+          gh auth login --with-token <<< "${{ steps.create_token.outputs.token }}"
+
+      - name: Configure organization repository ruleset
+        env:
+          GH_TOKEN: ${{ steps.create_token.outputs.token }}
+        run: |
+          set -e
+          org="${{ github.repository_owner }}"
+          ruleset_file="org-rulesets/default.json"
+
+          echo "Using ruleset definition from: $ruleset_file"
+
+          # Retrieve existing rulesets
+          echo "Getting existing organization rulesets..."
+          existing_ruleset_ids=$(gh api /orgs/"$org"/rulesets --jq '.[].id')
+
+          mapfile -t ruleset_ids <<< "$existing_ruleset_ids"
+
+          # Delete existing rulesets
+          if [ "${#ruleset_ids[@]}" -gt 0 ]; then
+            for id in "${ruleset_ids[@]}"; do
+              echo "  -> Deleting ruleset ID $id"
+              gh api /orgs/"$org"/rulesets/"$id" --method DELETE \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28"
+            done
+          else
+            echo "This organization has no existing ruleset applied to it."
+          fi
+
+          # Apply new ruleset
+          echo "Creating new organization ruleset..."
+          gh api /orgs/"$org"/rulesets --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --input "$ruleset_file"
+
+          echo "Ruleset applied!"
