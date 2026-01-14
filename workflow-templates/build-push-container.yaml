@@ -12,9 +12,10 @@ on:
       - $default-branch
 
 permissions:
-  contents: write
+  packages: write
 
 jobs:
   build-push-container:
     uses: gccloudone-aurora/.github/.github/workflows/build-push-container.yaml@v1
+
 
