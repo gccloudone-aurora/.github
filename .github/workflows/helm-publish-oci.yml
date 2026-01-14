@@ -1,0 +1,229 @@
+name: Helm Chart Publish (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      chart_path:
+        description: 'Path to Helm chart directory'
+        required: true
+        type: string
+      chart_name:
+        description: 'Chart name (defaults to directory name)'
+        required: false
+        type: string
+      registry_namespace:
+        description: 'Registry namespace for charts (e.g., "charts" to publish as charts/workload-a instead of workload-a)'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'OCI registry URL for publishing chart'
+        required: false
+        type: string
+      registry_owner:
+        description: 'Registry owner/organization (required for GHCR, e.g., platform-99)'
+        required: false
+        type: string
+      publish_chart:
+        description: 'Whether to publish the chart'
+        required: false
+        type: boolean
+        default: false
+      skip_if_exists:
+        description: 'Skip publishing if the chart version already exists in the registry'
+        required: false
+        type: boolean
+        default: true
+      helm_version:
+        description: 'Helm version to use'
+        required: false
+        type: string
+        default: '3.12.0'
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Registry username for publishing'
+        required: false
+      REGISTRY_PASSWORD:
+        description: 'Registry password or token for publishing'
+        required: false
+
+jobs:
+  # Package and publish chart
+  publish:
+    name: Package and Publish Helm Chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    outputs:
+      chart_version: ${{ steps.chart-version.outputs.version }}
+      chart_name: ${{ steps.chart-name.outputs.name }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ inputs.helm_version }}
+
+      - name: Extract chart name
+        id: chart-name
+        run: |
+          if [ -n "${{ inputs.chart_name }}" ]; then
+            CHART_NAME="${{ inputs.chart_name }}"
+          else
+            CHART_NAME=$(basename "${{ inputs.chart_path }}")
+          fi
+          echo "name=$CHART_NAME" >> $GITHUB_OUTPUT
+          echo "📋 Chart name: $CHART_NAME"
+
+      - name: Extract chart version
+        id: chart-version
+        run: |
+          VERSION=$(helm show chart ${{ inputs.chart_path }} | grep '^version:' | awk '{print $2}')
+          if [ -z "$VERSION" ]; then
+            echo "❌ Error: Could not extract version from Chart.yaml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📋 Chart version: $VERSION"
+
+      - name: Build chart dependencies
+        run: |
+          if [ -f "${{ inputs.chart_path }}/Chart.yaml" ] && grep -q "dependencies:" "${{ inputs.chart_path }}/Chart.yaml"; then
+            echo "📦 Building chart dependencies..."
+            helm dependency build ${{ inputs.chart_path }}
+            echo "✅ Chart dependencies built"
+          else
+            echo "ℹ️  No dependencies found in chart"
+          fi
+
+      - name: Package Helm chart
+        id: package
+        run: |
+          echo "📦 Packaging Helm chart..."
+          helm package ${{ inputs.chart_path }}
+          CHART_FILE=$(ls -t *.tgz | head -1)
+          if [ -z "$CHART_FILE" ]; then
+            echo "❌ Error: Chart packaging failed"
+            exit 1
+          fi
+          echo "file=$CHART_FILE" >> $GITHUB_OUTPUT
+          echo "✅ Chart packaged: $CHART_FILE"
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: ${{ steps.package.outputs.file }}
+          retention-days: 30
+
+      - name: Log in to OCI registry
+        if: inputs.publish_chart && inputs.registry != ''
+        run: |
+          echo "🔐 Logging in to OCI registry..."
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | helm registry login ${{ inputs.registry }} \
+            -u ${{ secrets.REGISTRY_USERNAME }} \
+            --password-stdin
+          echo "✅ Logged in to ${{ inputs.registry }}"
+
+      - name: Build registry paths
+        id: registry-paths
+        if: inputs.publish_chart && inputs.registry != ''
+        run: |
+          CHART_NAME="${{ steps.chart-name.outputs.name }}"
+          
+          # Build base registry path (without chart name)
+          # helm push automatically appends the chart name from package metadata
+          if [[ "${{ inputs.registry }}" == *"ghcr.io"* ]] && [ -n "${{ inputs.registry_owner }}" ]; then
+            if [ -n "${{ inputs.registry_namespace }}" ]; then
+              BASE_PATH="${{ inputs.registry }}/${{ inputs.registry_owner }}/${{ inputs.registry_namespace }}"
+            else
+              BASE_PATH="${{ inputs.registry }}/${{ inputs.registry_owner }}"
+            fi
+          else
+            if [ -n "${{ inputs.registry_namespace }}" ]; then
+              BASE_PATH="${{ inputs.registry }}/${{ inputs.registry_namespace }}"
+            else
+              BASE_PATH="${{ inputs.registry }}"
+            fi
+          fi
+          
+          # Full path with chart name (for helm show chart)
+          FULL_PATH="$BASE_PATH/$CHART_NAME"
+          
+          echo "base_path=$BASE_PATH" >> $GITHUB_OUTPUT
+          echo "full_path=$FULL_PATH" >> $GITHUB_OUTPUT
+          echo "📋 Base registry path (for push): oci://$BASE_PATH"
+          echo "📋 Full registry path (for check): oci://$FULL_PATH"
+
+      - name: Check if chart version exists
+        id: check-version
+        if: inputs.publish_chart && inputs.registry != '' && inputs.skip_if_exists
+        run: |
+          CHART_VERSION="${{ steps.chart-version.outputs.version }}"
+          FULL_PATH="${{ steps.registry-paths.outputs.full_path }}"
+          
+          echo "🔍 Checking if chart version $CHART_VERSION already exists in registry..."
+          echo "Registry path: oci://$FULL_PATH"
+          
+          # helm show chart with --version will succeed only if that exact version exists
+          # If it fails, the version doesn't exist (or chart doesn't exist, which is the same for our purposes)
+          if helm show chart "oci://$FULL_PATH" --version "$CHART_VERSION" &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Chart version $CHART_VERSION already exists in registry"
+            echo "Skipping publish (skip_if_exists is enabled)"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Chart version $CHART_VERSION does not exist, will publish"
+          fi
+
+      - name: Publish Helm chart to OCI registry
+        if: |
+          inputs.publish_chart &&
+          inputs.registry != '' &&
+          (
+            !inputs.skip_if_exists ||
+            steps.check-version.outputs.exists != 'true'
+          )
+        run: |
+          CHART_FILE="${{ steps.package.outputs.file }}"
+          CHART_VERSION="${{ steps.chart-version.outputs.version }}"
+          BASE_PATH="${{ steps.registry-paths.outputs.base_path }}"
+          FULL_PATH="${{ steps.registry-paths.outputs.full_path }}"
+          
+          echo "📤 Publishing chart to OCI registry..."
+          echo "Base registry path (helm push will append chart name): oci://$BASE_PATH"
+          echo "Final location will be: oci://$FULL_PATH"
+          helm push $CHART_FILE oci://$BASE_PATH
+          echo "✅ Chart published to oci://$FULL_PATH:$CHART_VERSION"
+
+      - name: Chart publish summary
+        if: always()
+        run: |
+          echo "### 📦 Helm Chart Package and Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chart**: ${{ steps.chart-name.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.chart-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Path**: \`${{ inputs.chart_path }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package File**: ${{ steps.package.outputs.file }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.publish_chart }}" == "true" ] && [ -n "${{ inputs.registry }}" ]; then
+            echo "- **Registry**: oci://${{ inputs.registry }}/${{ steps.chart-name.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ inputs.skip_if_exists }}" == "true" ] && [ "${{ steps.check-version.outputs.exists }}" == "true" ]; then
+              echo "- **Published**: ⏭️ Skipped (version already exists)" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.package.outcome }}" == "success" ]; then
+              echo "- **Published**: ✅ Yes" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Published**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- **Published**: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.skip_if_exists }}" == "true" ] && [ "${{ inputs.publish_chart }}" == "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> 💡 **Skip if exists** is enabled. Chart will only be published if the version doesn't already exist in the registry." >> $GITHUB_STEP_SUMMARY
+          fi
+
