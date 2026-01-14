@@ -1,0 +1,357 @@
+name: Build and Push Docker Image (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      context_path:
+        description: 'Path to Docker build context'
+        required: true
+        type: string
+      registry:
+        description: 'Container registry URL'
+        required: true
+        type: string
+      image_name:
+        description: 'Image name (without registry)'
+        required: true
+        type: string
+      push_image:
+        description: 'Whether to push the image'
+        required: false
+        type: boolean
+        default: true
+      platforms:
+        description: 'Platforms to build for (comma-separated)'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      include_semver_tags:
+        description: 'Include semantic version tags'
+        required: false
+        type: boolean
+        default: true
+      include_sha_tags:
+        description: 'Include SHA tags (short commit hash)'
+        required: false
+        type: boolean
+        default: true
+      include_branch_tags:
+        description: 'Include branch tags (branch name)'
+        required: false
+        type: boolean
+        default: true
+      include_pr_tags:
+        description: 'Include PR tags (pull request number)'
+        required: false
+        type: boolean
+        default: true
+      scan_image:
+        description: 'Scan image'
+        required: false
+        type: boolean
+        default: true
+      trivy_exit_code:
+        description: 'Exit code for Trivy scan (0 = do not fail on vulnerabilities, 1 = fail on vulnerabilities)'
+        required: false
+        type: string
+        default: '1'
+      skip_if_semver_exists:
+        description: 'Skip pushing semantic version tags (e.g., 1.0.0) if they already exist in registry'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Registry username'
+        required: false
+      REGISTRY_PASSWORD:
+        description: 'Registry password or token'
+        required: false
+
+jobs:
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      actions: read
+    
+    outputs:
+      image_digest: ${{ steps.meta.outputs.digest }}
+      image_tags: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Used for multi-platform builds
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # Unlocks Multi-Platform build, enables the GitHub Actions Cache, and Parallel Stage Execution
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: inputs.push_image
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.registry }}/${{ inputs.image_name }}
+          tags: |
+            type=ref,event=branch,enable=${{ inputs.include_branch_tags }}
+            type=ref,event=pr,enable=${{ inputs.include_pr_tags }}
+            type=sha,format=short,enable=${{ inputs.include_sha_tags }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},enable=${{ inputs.include_semver_tags }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ inputs.include_semver_tags }}
+          labels: |
+            org.opencontainers.image.vendor="Platform 99"
+            org.opencontainers.image.licenses="https://github.com/${{ github.repository }}/blob/main/LICENSE.md"
+
+      - name: Validate tags are generated
+        if: inputs.push_image
+        run: |
+          echo "📋 Validating generated tags..."
+          TAGS="${{ steps.meta.outputs.tags }}"
+          if [ -z "$TAGS" ] || [ "$TAGS" == "" ]; then
+            echo "❌ ERROR: No tags generated! Cannot push untagged images."
+            echo ""
+            echo "Tag configuration:"
+            echo "  - include_semver_tags: ${{ inputs.include_semver_tags }}"
+            echo "  - include_sha_tags: ${{ inputs.include_sha_tags }}"
+            echo "  - include_branch_tags: ${{ inputs.include_branch_tags }}"
+            echo "  - include_pr_tags: ${{ inputs.include_pr_tags }}"
+            echo "  - Event: ${{ github.event_name }}"
+            echo "  - Ref: ${{ github.ref }}"
+            echo "  - Ref type: ${{ github.ref_type }}"
+            echo ""
+            echo "At least one tag type must be enabled to push images."
+            exit 1
+          fi
+          echo "✅ Tags generated successfully:"
+          echo "$TAGS" | while IFS= read -r tag; do
+            echo "  - $tag"
+          done
+
+      # Build image for scanning (single platform, loaded locally)
+      - name: Build image for scanning
+        if: inputs.scan_image
+        id: docker_build_scan
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.context_path }}
+          push: false
+          load: true  # Load image locally for scanning (requires single platform)
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64  # Build single platform for scanning
+
+      # Extract first tag for scanning
+      - name: Get first image tag
+        if: inputs.scan_image
+        id: get_tag
+        run: |
+          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          echo "tag=$FIRST_TAG" >> $GITHUB_OUTPUT
+          echo "Scanning image: $FIRST_TAG"
+
+      - name: Scan image with Trivy
+        if: inputs.scan_image
+        id: trivy_scan_sarif
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.get_tag.outputs.tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Check SARIF file exists
+        id: check-sarif
+        if: inputs.scan_image
+        run: |
+          if [ -f "trivy-results.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "SARIF file found"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Warning: SARIF file not found"
+          fi
+
+      - name: Upload Trivy results to GitHub Security
+        if: inputs.scan_image && steps.check-sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results.sarif'
+          wait-for-processing: false
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan image with Trivy and format table
+        id: trivy_scan_table
+        if: inputs.scan_image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.get_tag.outputs.tag }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ inputs.trivy_exit_code }}
+
+      - name: Check if semantic version tags exist
+        id: check-semver-tags
+        if: inputs.push_image && inputs.skip_if_semver_exists && inputs.include_semver_tags && github.ref_type == 'tag'
+        run: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION_TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
+          
+          IMAGE_NAME="${{ inputs.registry }}/${{ inputs.image_name }}"
+          
+          echo "🔍 Checking if semantic version tags exist for version: $VERSION"
+          echo "Image: $IMAGE_NAME"
+          
+          # Check if the full version tag exists (e.g., 1.0.0)
+          FULL_VERSION_TAG="${IMAGE_NAME}:${VERSION}"
+          FULL_EXISTS="false"
+          if docker manifest inspect "$FULL_VERSION_TAG" &>/dev/null; then
+            FULL_EXISTS="true"
+            echo "⚠️ Tag $VERSION already exists in registry"
+          else
+            echo "✅ Tag $VERSION does not exist, will push"
+          fi
+          
+          # Check if major.minor tag exists (e.g., 1.0)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1,2)
+          MAJOR_MINOR_TAG="${IMAGE_NAME}:${MAJOR_MINOR}"
+          MAJOR_MINOR_EXISTS="false"
+          if docker manifest inspect "$MAJOR_MINOR_TAG" &>/dev/null; then
+            MAJOR_MINOR_EXISTS="true"
+            echo "⚠️ Tag $MAJOR_MINOR already exists in registry"
+          else
+            echo "✅ Tag $MAJOR_MINOR does not exist, will push"
+          fi
+          
+          echo "full_version_exists=$FULL_EXISTS" >> $GITHUB_OUTPUT
+          echo "major_minor_exists=$MAJOR_MINOR_EXISTS" >> $GITHUB_OUTPUT
+          
+          # If both exist, skip pushing
+          if [ "$FULL_EXISTS" == "true" ] && [ "$MAJOR_MINOR_EXISTS" == "true" ]; then
+            echo "skip_push=true" >> $GITHUB_OUTPUT
+            echo "⏭️ Both semantic version tags exist, skipping push"
+          else
+            echo "skip_push=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Build and push image (all platforms, only if scan passed or scan disabled)
+      - name: Build and push Docker image
+        id: docker_push
+        if: |
+          inputs.push_image &&
+          (
+            !inputs.skip_if_semver_exists ||
+            steps.check-semver-tags.outputs.skip_push != 'true' ||
+            steps.check-semver-tags.outcome == 'skipped'
+          ) &&
+          (
+            !inputs.scan_image ||
+            steps.trivy_scan_table.outcome == 'success'
+          )
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.context_path }}          # Path to the Dockerfile
+          push: ${{ inputs.push_image }}               # Whether to push the image
+          tags: ${{ steps.meta.outputs.tags }}         # Generated tags
+          labels: ${{ steps.meta.outputs.labels }} 
+          cache-from: type=gha                         # Use GitHub Actions cache
+          cache-to: type=gha,mode=max                  # Use GitHub Actions cache - This tells Docker where to save the layers it just created. Caches every single layer from every stage
+          platforms: ${{ inputs.platforms }}           # Allows for "Multi-platform" builds (comma-separated list of architectures)
+
+      - name: Image digest
+        if: inputs.push_image && steps.docker_push.outcome == 'success'
+        run: |
+          echo "📦 Image pushed with digest: ${{ steps.docker_push.outputs.digest }}"
+          echo "📍 Full image reference: ${{ inputs.registry }}/${{ inputs.image_name }}@${{ steps.docker_push.outputs.digest }}"
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "### 🐳 Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.scan_image }}" == "true" ]; then
+            echo "| Image Scan | ✅ Enabled |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Image Scan | ⏭️ Disabled |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.push_image }}" == "true" ]; then
+            if [ "${{ steps.check-semver-tags.outputs.skip_push }}" == "true" ]; then
+              echo "| Image Pushed | ⏭️ Skipped (semantic version tags already exist) |" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.docker_push.outcome }}" == "success" ]; then
+              echo "| Image Pushed | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Image Pushed | ❌ No |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Image Pushed | ❌ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry**: \`${{ inputs.registry }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ inputs.registry }}/${{ inputs.image_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Context**: \`${{ inputs.context_path }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms**: \`${{ inputs.platforms }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag Types Enabled:**" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.include_semver_tags }}" == "true" ]; then
+            echo "- ✅ Semantic version tags (e.g., 1.0.0, 1.0)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ Semantic version tags (disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.include_sha_tags }}" == "true" ]; then
+            echo "- ✅ SHA tags (short commit hash)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ SHA tags (disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.include_branch_tags }}" == "true" ]; then
+            echo "- ✅ Branch tags (branch name)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ Branch tags (disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.include_pr_tags }}" == "true" ]; then
+            echo "- ✅ PR tags (pull request number)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ PR tags (disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.ref }}" == "refs/heads/master" ]; then
+            echo "- ✅ Latest tag (default branch)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.docker_push.outcome }}" == "success" ] && [ -n "${{ steps.meta.outputs.tags }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Generated Tags**:\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ steps.docker_push.outputs.digest }}" ]; then
+              echo "**Image Digest**: \`${{ steps.docker_push.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.scan_image }}" == "true" ]; then
+            echo "> 🔒 Image security scan runs **before** pushing to prevent vulnerable images from being published." >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.include_semver_tags }}" == "true" ]; then
+            echo "> 🏷️ Semantic version tags are automatically generated from Git tags (e.g., v1.0.0 → 1.0.0, 1.0)." >> $GITHUB_STEP_SUMMARY
+          fi
+
