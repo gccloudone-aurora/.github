@@ -6,6 +6,7 @@ on:
 jobs:
   build-push-container:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,25 +19,6 @@ jobs:
           labels: |
             org.opencontainers.image.vendor="GC Cloud One: Aurora"
             org.opencontainers.image.licenses="https://github.com/${{ github.repository }}/blob/main/LICENSE.md"
-          tags: |
-            type=sha
-
-      - name: Build image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          load: true
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Vulnerability Scan
-        uses: aquasecurity/trivy-action@v0.20.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -46,14 +28,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push image
-        id: docker_build
+      - name: Build image 
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.18.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        id: docker_push
+        uses: docker/build-push-action@v5
+        with:
+          context: .         
+          push: true
+          load: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Output Image Digest
-        run: echo "Image pushed with digest ${{ steps.docker_build.outputs.digest }}"
+        if: github.event_name != 'pull_request'
+        run: echo "Image pushed with digest ${{ steps.docker_push.outputs.digest }}"
+
