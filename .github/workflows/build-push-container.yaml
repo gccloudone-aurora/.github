@@ -6,7 +6,6 @@ on:
 jobs:
   build-push-container:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +51,6 @@ jobs:
         with:
           context: .         
           push: true
-          load: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
