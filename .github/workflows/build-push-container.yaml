@@ -18,6 +18,25 @@ jobs:
           labels: |
             org.opencontainers.image.vendor="GC Cloud One: Aurora"
             org.opencontainers.image.licenses="https://github.com/${{ github.repository }}/blob/main/LICENSE.md"
+          tags: |
+            type=sha
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Vulnerability Scan
+        uses: aquasecurity/trivy-action@v0.20.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -27,7 +46,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push
+      - name: Push image
         id: docker_build
         uses: docker/build-push-action@v5
         with:
