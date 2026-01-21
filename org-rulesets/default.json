@@ -5,8 +5,12 @@
   "enforcement": "active",
   "conditions": {
     "ref_name": {
-      "exclude": [],
-      "include": ["~DEFAULT_BRANCH"]
+      "include": ["refs/heads/main"],
+      "exclude": []
+    },
+    "repository_name": {
+      "include": ["*"],
+      "exclude": []
     }
   },
   "rules": [
@@ -27,14 +31,12 @@
         "require_code_owner_review": true,
         "require_last_push_approval": true,
         "required_review_thread_resolution": true,
-        "automatic_copilot_code_review_enabled": false,
         "allowed_merge_methods": ["squash"]
       }
     }
   ],
   "bypass_actors": [
     {
-      "actor_id": null,
       "actor_type": "OrganizationAdmin",
       "bypass_mode": "always"
     }
