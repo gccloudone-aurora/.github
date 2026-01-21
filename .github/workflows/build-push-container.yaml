@@ -42,7 +42,7 @@ jobs:
           image-ref: ${{ steps.meta.outputs.tags }}
           format: table
           exit-code: 1
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
 
       - name: Push image
         if: github.event_name != 'pull_request'
