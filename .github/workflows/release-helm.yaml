@@ -2,6 +2,11 @@ name: Release Helm Charts
 
 on:
   workflow_call:
+    inputs:
+      pages_branch:
+        type: string
+        description: "The branch to publish Helm charts to."
+        default: "gh-pages"
 
 permissions:
   contents: write
@@ -37,5 +42,6 @@ jobs:
         uses: helm/chart-releaser-action@v1.7.0
         with:
           charts_dir: charts
+          pages_branch: ${{ inputs.pages_branch }}
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
