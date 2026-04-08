@@ -15,8 +15,8 @@ body:
     id: summary
     attributes:
       label: Epic Summary
-      description: Short, outcome-oriented description of this epic and its purpose.
-      placeholder: Integrate Chainguard into GC Secure Artifacts.
+      description: As a [type of user], I want [goal or need], so that [benefit or value].
+      placeholder: As a Developer, I want to integrate Chainguard into GC Secure Artifacts, so that the GC supply chain is secured.
     validations:
       required: true
 
