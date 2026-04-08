@@ -30,6 +30,15 @@ body:
         - [ ] Documentation updated in TechDocs
         - [ ] Cluster add-ons redeployed without downtime
 
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions
+      description: Include statements re changes in direction, technical / business decisions made impacting the epic.
+      placeholder: Due to shifting management priorities, this issue is no longer flagged as high priority.
+    validations:
+      required: false
+
   - type: input
     id: quarter
     attributes:
