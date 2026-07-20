@@ -10,3 +10,4 @@ Welcome to the **GC Cloud One: Aurora** GitHub organization.
 
 - **[gccloudone-aurora](https://github.com/gccloudone-aurora)**: The primary Aurora organization, managing Kubernetes manifests, controllers, and operators for platform automation, governance, and workload orchestration
 - **[gccloudone-aurora-iac](https://github.com/gccloudone-aurora-iac)**: Dedicated to Infrastructure as Code (IaC) for Aurora, enabling automated provisioning and management of cloud infrastructure across multiple environments
+- **[ssc-aurora](https://dev.azure.com/SSC-Aurora)**: Azure DevOps Organization where you can find the pipelines for deployment of Enterprise Scale Landing Zones (ESLZ)
