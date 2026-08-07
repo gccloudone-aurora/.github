@@ -1,0 +1,213 @@
+name: Test and Lint (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: 'Working directory for the Go application'
+        required: false
+        type: string
+        default: './workload-a'
+      go_version:
+        description: 'Go version to use'
+        required: false
+        type: string
+        default: '1.21'
+      upload_coverage_to_codecov:
+        description: 'Whether to upload coverage to Codecov'
+        required: false
+        type: boolean
+        default: true
+      generate_coverage_report:
+        description: 'Whether to generate a coverage report (text and HTML)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CODECOV_TOKEN:
+        description: 'Codecov token (optional)'
+        required: false
+
+jobs:
+  test:
+    name: Test and Lint (Golang)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache-dependency-path: ${{ inputs.working_directory }}/go.sum
+
+      # Verify dependency integrity and download all required modules
+      - name: Verify dependencies
+        run: |
+          go mod verify
+          go mod download
+
+      # Run static analysis to catch common errors and suspicious code patterns
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check code formatting
+        id: fmt-check
+        run: |
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+            echo "Code is not formatted"
+          else
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
+            echo "Code is properly formatted"
+          fi
+
+      - name: Format code
+        if: steps.fmt-check.outputs.needs_formatting == 'true' && github.event_name == 'pull_request'
+        run: |
+          gofmt -s -w .
+          echo "✅ Code has been automatically formatted"
+
+      - name: Commit formatted code
+        if: steps.fmt-check.outputs.needs_formatting == 'true' && github.event_name == 'pull_request'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: auto-format code with gofmt"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Fail if formatting needed (non-PR)
+        if: steps.fmt-check.outputs.needs_formatting == 'true' && github.event_name != 'pull_request'
+        run: |
+          echo "Code is not formatted. Run 'go fmt ./...'"
+          gofmt -s -d .
+          exit 1
+
+      - name: Run tests
+        id: run-tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Generate coverage report
+        id: generate-coverage-report
+        if: inputs.generate_coverage_report && always() && steps.run-tests.outcome == 'success'
+        run: |
+          if [ -f "coverage.out" ]; then
+            echo "📊 Generating coverage report..."
+            
+            # Generate text summary
+            go tool cover -func=coverage.out > coverage.txt
+            echo "✅ Text coverage report generated: coverage.txt"
+            
+            # Extract total coverage percentage
+            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+            echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "📈 Total coverage: $COVERAGE"
+            
+            # Generate HTML report
+            go tool cover -html=coverage.out -o coverage.html
+            echo "✅ HTML coverage report generated: coverage.html"
+          else
+            echo "⚠️ Coverage file not found, skipping report generation"
+            echo "coverage=N/A" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload coverage report artifact
+        if: inputs.generate_coverage_report && always() && steps.run-tests.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.txt
+            coverage.html
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Extract project name
+        id: project-name
+        if: inputs.upload_coverage_to_codecov && steps.run-tests.outcome == 'success'
+        run: |
+          PROJECT_NAME=$(basename "${{ inputs.working_directory }}")
+          # Remove leading dot and slash if present
+          PROJECT_NAME=${PROJECT_NAME#./}
+          echo "name=$PROJECT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload coverage to codecov
+        if: inputs.upload_coverage_to_codecov && steps.run-tests.outcome == 'success'
+        id: upload-coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ${{ inputs.working_directory }}/coverage.out
+          flags: ${{ steps.project-name.outputs.name }}
+          name: ${{ steps.project-name.outputs.name }}-coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Test and Lint Summary
+        if: always()
+        run: |
+          echo "### 🧪 Test and Lint Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Job Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Go Version | \`${{ inputs.go_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Working Directory | \`${{ inputs.working_directory }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.fmt-check.outcome }}" == "success" ]; then
+            if [ "${{ steps.fmt-check.outputs.needs_formatting }}" == "true" ]; then
+              if [ "${{ github.event_name }}" == "pull_request" ]; then
+                echo "| Code Formatting | ✅ Auto-formatted and committed |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| Code Formatting | ❌ Needs formatting (run 'go fmt ./...') |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| Code Formatting | ✅ Already formatted |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Code Formatting | ⚠️ Check failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.upload-coverage.outcome }}" == "success" ]; then
+            echo "| Coverage Upload | ✅ Uploaded to Codecov |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.upload_coverage_to_codecov }}" == "true" ]; then
+            echo "| Coverage Upload | ⚠️ Upload attempted (may have failed) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Coverage Upload | ⏭️ Disabled |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.generate_coverage_report }}" == "true" ] && [ -n "${{ steps.generate-coverage-report.outputs.coverage }}" ]; then
+            echo "| Coverage Report | 📊 ${{ steps.generate-coverage-report.outputs.coverage }} (see artifacts) |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.generate_coverage_report }}" == "true" ]; then
+            echo "| Coverage Report | ⚠️ Generation attempted |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Coverage Report | ⏭️ Disabled |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Checks Performed:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dependency verification (\`go mod verify\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Static analysis (\`go vet\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Code formatting check (\`gofmt\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit tests with race detection (\`go test -race\`)" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.upload_coverage_to_codecov }}" == "true" ]; then
+            echo "- ✅ Coverage report generated and uploaded to Codecov" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.generate_coverage_report }}" == "true" ]; then
+            echo "- ✅ Coverage report generated (text and HTML) - available as artifact" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ steps.fmt-check.outputs.needs_formatting }}" == "true" ]; then
+            echo "> 🔧 Code formatting was automatically applied and committed to this PR." >> $GITHUB_STEP_SUMMARY
+          fi
+
